@@ -7,10 +7,12 @@ local docsettings = require("frontend/docsettings")
 local UIManager = require("ui/uimanager")
 local Event = require("ui/event")
 local lfs = require("libs/libkoreader-lfs")
+local json = require("json")
 
 local annotations = require("annotations")
 local remote = require("remote")
 local utils = require("utils")
+local raw_sidecar = require("raw_sidecar")
 
 local SyncManager = {}
 
@@ -259,9 +261,73 @@ function SyncManager:_onSyncComplete(document, success, merged_list)
             self.plugin:applySyncedAnnotations(document, merged_list)
         end
         self:removeFromChangedDocumentsFile(document)
+        -- Gate 1 passed: annotation sync succeeded and merged state applied.
+        -- Now push the raw sidecar file (if enabled) — never before this point.
+        self:_uploadRawSidecar(document)
     else
         logger.warn("AnnotationSync: sync failed for " .. (document.file or "unknown") .. ", keeping in changed list")
     end
+end
+
+-- Uploads the raw sidecar file (metadata.<ext>.lua) to the cloud, under a
+-- subdirectory named after the .sdr folder basename. Only runs after a
+-- successful annotation sync and successful flush of merged state to disk.
+function SyncManager:_uploadRawSidecar(document)
+    if not self.plugin.settings.upload_raw_sidecar then return end
+
+    local file = document and document.file
+    if not file then return end
+
+    -- Gate 2: force merged annotations to disk. For the inactive-document branch
+    -- applySyncedAnnotations already flushed; for the active document we need
+    -- FlushSettings to propagate onSaveSettings -> doc_settings flush.
+    self:_flushSettings()
+
+    local sdr_dir = docsettings:getSidecarDir(file)
+    if not sdr_dir or sdr_dir == "" then
+        logger.warn("AnnotationSync: raw sidecar upload skipped — no sidecar dir for " .. file)
+        return
+    end
+
+    local sidecar_path = self:_resolveSidecarFile(file, sdr_dir)
+    if not sidecar_path then
+        logger.warn("AnnotationSync: raw sidecar upload skipped — sidecar file not found under " .. sdr_dir)
+        return
+    end
+
+    local sdr_basename = sdr_dir:match("([^/]+)/?$")
+    if not sdr_basename or sdr_basename == "" then
+        logger.warn("AnnotationSync: raw sidecar upload skipped — could not derive basename from " .. sdr_dir)
+        return
+    end
+
+    -- Gate 3: provider dispatch. raw_sidecar.upload_sidecar no-ops gracefully
+    -- for unsupported providers (Dropbox, FTP) so future providers plug in
+    -- without touching this call site.
+    local server_json = G_reader_settings:readSetting("cloud_server_object")
+    if not server_json or server_json == "" then
+        logger.dbg("AnnotationSync: raw sidecar upload skipped — no cloud server configured")
+        return
+    end
+    local ok, server = pcall(json.decode, server_json)
+    if not ok or type(server) ~= "table" then
+        logger.warn("AnnotationSync: raw sidecar upload skipped — malformed cloud_server_object")
+        return
+    end
+
+    raw_sidecar.upload_sidecar(server, sdr_basename, sidecar_path)
+end
+
+-- Resolves the path to metadata.<ext>.lua inside the sdr directory, following
+-- KOReader's naming convention. Returns nil if the file doesn't exist on disk.
+function SyncManager:_resolveSidecarFile(file, sdr_dir)
+    local ext = file:match("%.([^%.]+)$")
+    ext = (ext and ext:lower()) or "lua"
+    local sidecar_path = sdr_dir .. "/metadata." .. ext .. ".lua"
+    if lfs.attributes(sidecar_path, "mode") == "file" then
+        return sidecar_path
+    end
+    return nil
 end
 
 -- Helper to serialize a Lua table as code
