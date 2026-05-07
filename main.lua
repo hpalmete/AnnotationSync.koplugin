@@ -36,6 +36,7 @@ AnnotationSyncPlugin.default_settings = {
     last_sync = "Never",
     use_filename= false,
     network_auto_sync = false,
+    upload_raw_sidecar = false,
 }
 
 function AnnotationSyncPlugin:init()
@@ -81,6 +82,16 @@ function AnnotationSyncPlugin:addToMainMenu(menu_items)
                         callback = function()
                             local current = self.settings.use_filename
                             self.settings.use_filename = not current
+                            UIManager:close()
+                        end
+                    },
+                    {
+                        text = _("Also upload raw sidecar (metadata.<ext>.lua) to cloud"),
+                        checked_func = function()
+                            return self.settings.upload_raw_sidecar
+                        end,
+                        callback = function()
+                            self.settings.upload_raw_sidecar = not self.settings.upload_raw_sidecar
                             UIManager:close()
                         end
                     },
