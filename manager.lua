@@ -269,9 +269,10 @@ function SyncManager:_onSyncComplete(document, success, merged_list)
     end
 end
 
--- Uploads the raw sidecar file (metadata.<ext>.lua) to the cloud, under a
--- subdirectory named after the .sdr folder basename. Only runs after a
--- successful annotation sync and successful flush of merged state to disk.
+-- Uploads the raw sidecar file (metadata.<ext>.lua) and the book file itself
+-- to the cloud, under a subdirectory named after the .sdr folder basename.
+-- Only runs after a successful annotation sync and successful flush of merged
+-- state to disk.
 function SyncManager:_uploadRawSidecar(document)
     if not self.plugin.settings.upload_raw_sidecar then return end
 
@@ -316,6 +317,9 @@ function SyncManager:_uploadRawSidecar(document)
     end
 
     raw_sidecar.upload_sidecar(server, sdr_basename, sidecar_path)
+
+    -- Also upload the book file itself into the same remote .sdr subdirectory.
+    raw_sidecar.upload_sidecar(server, sdr_basename, file)
 end
 
 -- Resolves the path to metadata.<ext>.lua inside the sdr directory, following

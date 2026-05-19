@@ -224,4 +224,36 @@ describe("SyncManager._uploadRawSidecar guard chain", function()
         raw_sidecar.upload_sidecar = original
         assert.is_false(called)
     end)
+
+    it("uploads both the sidecar and the book file to the same subdir", function()
+        local raw_sidecar = require("raw_sidecar")
+        local calls = {}
+        local original = raw_sidecar.upload_sidecar
+        raw_sidecar.upload_sidecar = function(_server, subdir, path)
+            table.insert(calls, { subdir = subdir, path = path })
+            return true
+        end
+
+        local book_path = test_data_dir .. "/book.epub"
+        local bf = io.open(book_path, "w")
+        bf:write("fake epub bytes\n")
+        bf:close()
+
+        G_reader_settings:saveSetting("cloud_server_object", json.encode({
+            type = "webdav", address = "https://d", username = "u",
+            password = "p", url = "/",
+        }))
+
+        local mgr = SyncManager:new(make_plugin(true))
+        mgr:_uploadRawSidecar({ file = book_path })
+
+        raw_sidecar.upload_sidecar = original
+        G_reader_settings:delSetting("cloud_server_object")
+
+        assert.are.equal(2, #calls)
+        assert.are.equal("book.sdr", calls[1].subdir)
+        assert.are.equal(test_data_dir .. "/book.sdr/metadata.epub.lua", calls[1].path)
+        assert.are.equal("book.sdr", calls[2].subdir)
+        assert.are.equal(book_path, calls[2].path)
+    end)
 end)

@@ -86,7 +86,7 @@ function AnnotationSyncPlugin:addToMainMenu(menu_items)
                         end
                     },
                     {
-                        text = _("Also upload raw sidecar (metadata.<ext>.lua) to cloud"),
+                        text = _("Also upload book file and raw sidecar (metadata.<ext>.lua) to cloud"),
                         checked_func = function()
                             return self.settings.upload_raw_sidecar
                         end,
