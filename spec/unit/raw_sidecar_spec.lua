@@ -164,6 +164,43 @@ describe("Raw sidecar upload", function()
         assert.are.equal(local_path, called.path)
         raw_sidecar.providers.ftp = nil
     end)
+
+    it("upload_book uploads to the base sync dir without an MKCOL", function()
+        fresh_module()
+        local server = {
+            type = "webdav",
+            address = "https://dav.example.com/remote.php/dav/files/u",
+            username = "alice",
+            password = "secret",
+            url = "/sync/annotations",
+        }
+        local local_path = write_fake_sidecar("MyBook.epub")
+        local ok = raw_sidecar.upload_book(server, local_path)
+        assert.is_true(ok)
+        assert.are.equal(1, #captured.calls)
+        assert.are.equal("put", captured.calls[1].op)
+        assert.are.equal(
+            "https://dav.example.com/remote.php/dav/files/u/sync/annotations/MyBook.epub",
+            captured.calls[1].url
+        )
+        assert.are.equal(local_path, captured.calls[1].local_path)
+    end)
+
+    it("upload_book rejects malformed inputs without calling provider", function()
+        fresh_module()
+        assert.is_false(raw_sidecar.upload_book(nil, "/tmp/x"))
+        assert.is_false(raw_sidecar.upload_book({ type = "webdav" }, ""))
+        assert.are.equal(0, #captured.calls)
+    end)
+
+    it("upload_book no-ops for unsupported providers (Dropbox)", function()
+        fresh_module()
+        local ok = raw_sidecar.upload_book({
+            type = "dropbox", address = "x", username = "u", password = "p", url = "/",
+        }, write_fake_sidecar("MyBook.epub"))
+        assert.is_false(ok)
+        assert.are.equal(0, #captured.calls)
+    end)
 end)
 
 describe("SyncManager._uploadRawSidecar guard chain", function()
@@ -225,12 +262,18 @@ describe("SyncManager._uploadRawSidecar guard chain", function()
         assert.is_false(called)
     end)
 
-    it("uploads both the sidecar and the book file to the same subdir", function()
+    it("uploads the sidecar into its .sdr subdir and the book alongside it", function()
         local raw_sidecar = require("raw_sidecar")
-        local calls = {}
-        local original = raw_sidecar.upload_sidecar
+        local sidecar_calls = {}
+        local book_calls = {}
+        local original_sidecar = raw_sidecar.upload_sidecar
+        local original_book = raw_sidecar.upload_book
         raw_sidecar.upload_sidecar = function(_server, subdir, path)
-            table.insert(calls, { subdir = subdir, path = path })
+            table.insert(sidecar_calls, { subdir = subdir, path = path })
+            return true
+        end
+        raw_sidecar.upload_book = function(_server, path)
+            table.insert(book_calls, { path = path })
             return true
         end
 
@@ -247,13 +290,14 @@ describe("SyncManager._uploadRawSidecar guard chain", function()
         local mgr = SyncManager:new(make_plugin(true))
         mgr:_uploadRawSidecar({ file = book_path })
 
-        raw_sidecar.upload_sidecar = original
+        raw_sidecar.upload_sidecar = original_sidecar
+        raw_sidecar.upload_book = original_book
         G_reader_settings:delSetting("cloud_server_object")
 
-        assert.are.equal(2, #calls)
-        assert.are.equal("book.sdr", calls[1].subdir)
-        assert.are.equal(test_data_dir .. "/book.sdr/metadata.epub.lua", calls[1].path)
-        assert.are.equal("book.sdr", calls[2].subdir)
-        assert.are.equal(book_path, calls[2].path)
+        assert.are.equal(1, #sidecar_calls)
+        assert.are.equal("book.sdr", sidecar_calls[1].subdir)
+        assert.are.equal(test_data_dir .. "/book.sdr/metadata.epub.lua", sidecar_calls[1].path)
+        assert.are.equal(1, #book_calls)
+        assert.are.equal(book_path, book_calls[1].path)
     end)
 end)
